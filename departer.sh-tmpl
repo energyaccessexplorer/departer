@@ -1,0 +1,11 @@
+#!/bin/sh
+
+cd ${OFFROAD_WORKSPACE}
+
+if ! IDSFILE=$1/$2 ID=$2 bmake gobuild website tool fetch zip os=${3}; then
+	exit 1
+fi
+
+mv energyaccessexplorer-$2.zip ${DEPARTER_TMPDIR}/
+
+echo ${DEPARTER_STATIC}/energyaccessexplorer-$2.zip

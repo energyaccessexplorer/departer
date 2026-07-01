@@ -1,0 +1,12 @@
+[Unit]
+Description=Departer service
+
+[Service]
+User=${DEPARTER_USER}
+WorkingDirectory=${DEPARTER_TMPDIR}
+ExecStartPre=rm -f ${DEPARTER_SOCKET}
+ExecStart=${DEPARTER_CMD}
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
