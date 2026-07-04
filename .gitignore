@@ -1,3 +1,6 @@
 /departer
 /departer.service
 /departer.sh
+/departer.local.sh
+/.env
+*~
