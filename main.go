@@ -91,7 +91,7 @@ func build(p payload, id string) {
 }
 
 func system_check() {
-	fmt.Printf("Allowed role claims: %s\n", roles)
+	fmt.Printf("Role claims are not checked (any validly signed token is accepted, as in paver); -role flags are accepted but unused: %s\n", roles)
 
 	_, err := os.Stat(pubkeyfile)
 	if os.IsNotExist(err) {
@@ -138,9 +138,16 @@ func main() {
 	system_check()
 
 	routes := []srv.Route{
-		{"/build", roles, H{"POST": _build}},
-		{"/check", roles, H{"GET": _check}},
+		{"/build", []string{"*"}, H{"POST": _build}},
+		{"/check", []string{"*"}, H{"GET": _check}},
 	}
+
+	// "*" (see srv.jwt_check) means "any validly signed token": the request must
+	// carry a JWT this service can verify, but its `role` claim is not consulted.
+	// That matches paver, which gates its routes the same way, and PostgREST,
+	// which reads the database role from a claim that does not exist here
+	// (jwt-role-claim-key = ".norole"). The -role flags are still accepted so
+	// existing DEPARTER_CMD lines keep parsing; they no longer gate anything.
 
 	srv.Run(socket, routes, pubkeyfile)
 }
