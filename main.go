@@ -62,12 +62,20 @@ func _build(w http.ResponseWriter, r *http.Request) {
 
 	id := uuid.NewV4().String()
 
-	go build(p, id)
+	// The export is built with the requester's own permissions, so hand their
+	// token down to the build instead of relying on a shared token in the
+	// offroad workspace. It travels in the child's environment, not in argv:
+	// /proc/<pid>/cmdline (what ps shows) is world-readable, /proc/<pid>/environ
+	// is only readable by the same user. Note the offroad makefile includes its
+	// .env after the environment, so a token there would still win.
+	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+
+	go build(p, id, token)
 
 	io.WriteString(w, fmt.Sprintf(`{ "id": "%s" }`, id))
 }
 
-func build(p payload, id string) {
+func build(p payload, id string, token string) {
 	file, _ := os.Create(tmpdir + "/" + id)
 	outfile, _ := os.Create(tmpdir + "/" + id + ".log")
 	defer outfile.Close()
@@ -75,6 +83,9 @@ func build(p payload, id string) {
 	io.WriteString(file, strings.Join(p.IDS, "\n")+"\n")
 
 	cmd := exec.Command(script, tmpdir, id, p.OS)
+	if token != "" {
+		cmd.Env = append(os.Environ(), "OFFROAD_TOKEN="+token)
+	}
 	cmd.Stdout = outfile
 	cmd.Stderr = outfile
 
