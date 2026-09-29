@@ -34,6 +34,10 @@ func (i *arrayFlag) Set(value string) error {
 	return nil
 }
 
+// Set at build time (-ldflags -X main.COMMIT_SHA=…); reported by /commit so CI
+// (and anyone else) can verify which revision a box is actually running.
+var COMMIT_SHA string
+
 var (
 	roles      arrayFlag
 	pubkeyfile string
@@ -49,6 +53,10 @@ func _check(w http.ResponseWriter, r *http.Request) {
 	srv.JWT_JSON(r, &i)
 
 	io.WriteString(w, i.Role)
+}
+
+func _commit(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(w, COMMIT_SHA)
 }
 
 func _build(w http.ResponseWriter, r *http.Request) {
@@ -151,6 +159,7 @@ func main() {
 	routes := []srv.Route{
 		{"/build", []string{"*"}, H{"POST": _build}},
 		{"/check", []string{"*"}, H{"GET": _check}},
+		{"/commit", nil, H{"GET": _commit}},
 	}
 
 	// "*" (see srv.jwt_check) means "any validly signed token": the request must

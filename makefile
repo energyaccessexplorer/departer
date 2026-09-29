@@ -16,10 +16,12 @@ DEPARTER_CMD = departer \
 	-tmpdir ${DEPARTER_TMPDIR} \
 	-pubkey ${DEPARTER_PUBKEY}
 
+COMMIT_SHA != git rev-parse --short HEAD
+
 build:
 	go get
 	go fmt
-	go build
+	go build -ldflags "-s -X main.COMMIT_SHA=${COMMIT_SHA}"
 
 .export DEPARTER_CMD
 .export DEPARTER_SOCKET
