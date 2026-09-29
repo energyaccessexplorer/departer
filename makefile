@@ -2,6 +2,10 @@ default: clean build
 
 -include ".env"
 
+# URL path prefix nginx serves finished builds under (departer.sh-tmpl
+# echoes it as the download link). Default here so a regenerate can't lose it.
+DEPARTER_STATIC ?= /departer/builds
+
 DEPARTER_CMD = departer \
 	-role admin \
 	-role leader \
