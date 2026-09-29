@@ -7,7 +7,7 @@ name: PRODUCTION DEPLOY
 
 on:
   push:
-    branches: [ trunk ]
+    branches: [ main ]
 
 jobs:
   build-deploy:

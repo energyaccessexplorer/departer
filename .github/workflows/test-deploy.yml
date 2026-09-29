@@ -1,0 +1,61 @@
+name: TEST DEPLOY
+
+# Builds departer and POSTs it to the per-ticket slot on the staging
+# orchestrator, mirroring paver's test-deploy.yml. The ticket's instance is then
+# reachable at https://paver.energyaccessexplorer.org/<TICKET>/departer, which is
+# what the admin's test deploy points DEPARTER_ENDPOINT at.
+
+on:
+  push:
+    branches: [ '**', '!trunk', '!production' ]
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Parse ticket tag from commit message
+        id: ticket
+        env:
+          MSG: ${{ github.event.head_commit.message }}
+        run: |
+          if [[ "$MSG" =~ \[Tests\ ([A-Z]+-[0-9]+)\] ]]; then
+            echo "id=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+            echo "matched=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "matched=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.ticket.outputs.matched == 'true'
+
+      - uses: actions/setup-go@v5
+        if: steps.ticket.outputs.matched == 'true'
+        with:
+          go-version: 'stable'
+
+      - name: Build
+        if: steps.ticket.outputs.matched == 'true'
+        run: |
+          go build -ldflags "-s -X main.COMMIT_SHA=${GITHUB_SHA:0:7}" -o departer .
+
+      - name: Deploy
+        if: steps.ticket.outputs.matched == 'true'
+        run: |
+          curl --fail --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer ${{ secrets.DEPARTER_DEPLOY_TOKEN }}" \
+            --data-binary @departer \
+            "https://paver.energyaccessexplorer.org/deploy/${{ steps.ticket.outputs.id }}/departer"
+
+      - name: Verify
+        if: steps.ticket.outputs.matched == 'true'
+        run: |
+          url="https://paver.energyaccessexplorer.org/${{ steps.ticket.outputs.id }}/departer/commit"
+          want="${GITHUB_SHA:0:7}"
+          for i in $(seq 1 10); do
+            got="$(curl --fail --silent --show-error "$url")" && [ "$got" = "$want" ] && exit 0
+            sleep 2
+          done
+          echo "expected $want, got '$got'" >&2
+          exit 1
