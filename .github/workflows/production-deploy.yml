@@ -1,0 +1,55 @@
+name: PRODUCTION DEPLOY
+
+# Builds departer and ships it to the departer box via the restricted departerci
+# user, mirroring paver's production deploy (paver/.github/workflows/production-deploy.yml).
+# The Verify step polls GET /departer/commit until the box reports the SHA that
+# was just built — the same convention paver uses.
+
+on:
+  push:
+    branches: [ trunk ]
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      # No GDAL/CGO here, unlike paver: departer is pure Go stdlib + jwt.
+      - name: Build
+        run: |
+          go build -ldflags "-s -X main.COMMIT_SHA=${GITHUB_SHA:0:7}" -o departer .
+
+      # DEPARTER_PROD_HOST: raw box hostname. DEPARTER_SERVER_HOST (Verify step): public domain.
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPARTER_PROD_DEPLOY_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ vars.DEPARTER_PROD_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Ship binary
+        run: |
+          scp -i ~/.ssh/deploy_key departer \
+            departerci@${{ vars.DEPARTER_PROD_HOST }}:incoming/departer
+
+      - name: Install + restart
+        run: |
+          ssh -i ~/.ssh/deploy_key departerci@${{ vars.DEPARTER_PROD_HOST }} \
+            sudo /usr/local/sbin/departer-deploy.sh
+
+      - name: Verify
+        run: |
+          url="https://${{ vars.DEPARTER_SERVER_HOST }}/departer/commit"
+          want="${GITHUB_SHA:0:7}"
+          for i in $(seq 1 10); do
+            got="$(curl --fail --silent --show-error "$url")" && [ "$got" = "$want" ] && exit 0
+            sleep 2
+          done
+          echo "expected $want, got '$got'" >&2
+          exit 1
