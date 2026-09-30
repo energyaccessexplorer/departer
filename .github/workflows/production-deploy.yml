@@ -9,6 +9,10 @@ on:
   push:
     branches: [ main ]
 
+  # So a rollout can be exercised (or re-run after a rollback) without merging
+  # to main: Actions -> PRODUCTION DEPLOY -> Run workflow -> pick the branch.
+  workflow_dispatch:
+
 jobs:
   build-deploy:
     runs-on: ubuntu-latest
