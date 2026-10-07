@@ -8,4 +8,4 @@ fi
 
 mv energyaccessexplorer-$2.zip ${DEPARTER_TMPDIR}/
 
-echo ${DEPARTER_STATIC}/energyaccessexplorer-$2.zip
+echo ${DEPARTER_PUBLIC_BASE}${DEPARTER_STATIC}/energyaccessexplorer-$2.zip

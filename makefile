@@ -6,6 +6,11 @@ default: clean build
 # echoes it as the download link). Default here so a regenerate can't lose it.
 DEPARTER_STATIC ?= /departer/builds
 
+# Origin the builds are publicly reachable at — prepended to the download link
+# the build log ends with, so the link is absolute (and clickable) in the CMS.
+# The staging orchestrator overrides this per ticket; production uses this.
+DEPARTER_PUBLIC_BASE ?= https://paver.energyaccessexplorer.org
+
 DEPARTER_CMD = departer \
 	-role admin \
 	-role leader \
@@ -28,6 +33,8 @@ build:
 .export DEPARTER_WORKSPACE
 .export DEPARTER_TMPDIR
 .export DEPARTER_USER
+.export DEPARTER_STATIC
+.export DEPARTER_PUBLIC_BASE
 .export OFFROAD_WORKSPACE
 	@envsubst <departer.service-tmpl >departer.service
 	@envsubst <departer.sh-tmpl >departer.sh

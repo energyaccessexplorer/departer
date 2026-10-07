@@ -13,6 +13,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
+	"time"
 )
 
 type payload struct {
@@ -37,6 +39,21 @@ func (i *arrayFlag) Set(value string) error {
 // Set at build time (-ldflags -X main.COMMIT_SHA=…); reported by /commit so CI
 // (and anyone else) can verify which revision a box is actually running.
 var COMMIT_SHA string
+
+// Recent builds, so /status/<id> can report running/done/error without the CMS
+// scraping the log. Entries for finished builds are kept for a day (the builds
+// themselves live that long) and swept on new builds.
+type build_rec struct {
+	state    string
+	zip      string
+	detail   string
+	finished time.Time
+}
+
+var (
+	builds_mu sync.Mutex
+	builds    = map[string]*build_rec{}
+)
 
 var (
 	roles      arrayFlag
@@ -70,6 +87,12 @@ func _build(w http.ResponseWriter, r *http.Request) {
 
 	id := uuid.NewV4().String()
 
+	// Register synchronously so /status/<id> answers from the moment the
+	// caller learns the id (the goroutine only updates the record at the end).
+	builds_mu.Lock()
+	builds[id] = &build_rec{state: "running"}
+	builds_mu.Unlock()
+
 	// The export is built with the requester's own permissions, so hand their
 	// token down to the build instead of relying on a shared token in the
 	// offroad workspace. It travels in the child's environment, not in argv:
@@ -84,7 +107,34 @@ func _build(w http.ResponseWriter, r *http.Request) {
 }
 
 func build(p payload, id string, token string) {
+	defer func() {
+		builds_mu.Lock()
+		defer builds_mu.Unlock()
+
+		// The build script's last log line is the artifact's path — the same
+		// line the CMS shows as the download link.
+		if line := last_log_line(tmpdir + "/" + id + ".log"); strings.HasSuffix(line, ".zip") {
+			builds[id].state = "done"
+			builds[id].zip = line
+		} else {
+			builds[id].state = "error"
+			builds[id].detail = line
+		}
+		builds[id].finished = time.Now()
+
+		// Sweep finished records older than a day (or if the map balloons).
+		if len(builds) > 100 {
+			for k, v := range builds {
+				if v.state != "running" && time.Since(v.finished) > 24*time.Hour {
+					delete(builds, k)
+				}
+			}
+		}
+	}()
+
 	file, _ := os.Create(tmpdir + "/" + id)
+	defer file.Close()
+
 	outfile, _ := os.Create(tmpdir + "/" + id + ".log")
 	defer outfile.Close()
 
@@ -107,6 +157,79 @@ func build(p payload, id string, token string) {
 			fmt.Println("Got:", s)
 		}
 	}
+}
+
+// Last non-empty line of the build log (its tail, in practice).
+func last_log_line(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	st, err := f.Stat()
+	if err != nil || st.Size() == 0 {
+		return ""
+	}
+
+	off := int64(0)
+	if st.Size() > 4096 {
+		off = st.Size() - 4096
+	}
+
+	buf := make([]byte, st.Size()-off)
+	if _, err := f.ReadAt(buf, off); err != nil && err != io.EOF {
+		return ""
+	}
+
+	lines := strings.Split(strings.ReplaceAll(string(buf), "\r", ""), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if s := strings.TrimSpace(lines[i]); s != "" {
+			return s
+		}
+	}
+
+	return ""
+}
+
+// GET /status/<id> — how the CMS follows a build without scraping the log:
+// { "id", "state": running|done|error, "zip" (done), "detail" (last log line) }.
+// Memory first; after a restart the same answer is reconstructed from the log
+// the build left behind.
+func _status(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	id := strings.Trim(strings.TrimPrefix(r.URL.Path, "/status/"), "/")
+	if id == "" || strings.Contains(id, "/") {
+		http.Error(w, `{"error":"bad build id"}`, http.StatusBadRequest)
+		return
+	}
+
+	builds_mu.Lock()
+	rec, ok := builds[id]
+	builds_mu.Unlock()
+
+	if !ok {
+		logline := last_log_line(tmpdir + "/" + id + ".log")
+		if _, err := os.Stat(tmpdir + "/" + id + ".log"); os.IsNotExist(err) {
+			http.Error(w, `{"error":"unknown build"}`, http.StatusNotFound)
+			return
+		}
+		if strings.HasSuffix(logline, ".zip") {
+			rec = &build_rec{state: "done", zip: logline, detail: logline}
+		} else {
+			rec = &build_rec{state: "running", detail: logline}
+		}
+	}
+
+	out := map[string]string{"id": id, "state": rec.state}
+	if rec.zip != "" {
+		out["zip"] = rec.zip
+	}
+	if rec.detail != "" {
+		out["detail"] = rec.detail
+	}
+	json.NewEncoder(w).Encode(out)
 }
 
 func system_check() {
@@ -160,6 +283,7 @@ func main() {
 		{"/build", []string{"*"}, H{"POST": _build}},
 		{"/check", []string{"*"}, H{"GET": _check}},
 		{"/commit", nil, H{"GET": _commit}},
+		{"/status/", []string{"*"}, H{"GET": _status}},
 	}
 
 	// "*" (see srv.jwt_check) means "any validly signed token": the request must
